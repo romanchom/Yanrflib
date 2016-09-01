@@ -69,12 +69,8 @@ void Yanrf::init(uint32_t powerOnResetDelay){
 		ENABLE_DYNAMIC_PAYLOAD | ENABLE_ACK_PAYLOAD | ENABLE_DYNAMIC_ACK);
 
 	// flush all queues in case something is still theres
-	for(int i = 0; i < 3; ++i){
-		beginCommand(CMD_FLUSH_TRANSMIT);
-		endCommand();
-		beginCommand(CMD_FLUSH_RECEIVE);
-		endCommand();
-	}
+	flushReceive();
+	flushTransmit();
 	// wait till radio oscillator boots
 	delayMicroseconds(micros() - bootTime);
 }
@@ -123,10 +119,16 @@ uint8_t Yanrf::getTransmissionState(){
 	uint16_t state = beginCommand(CMD_READ_REGISTER | REG_FIFO_STATUS);
 	state |= (static_cast<uint16_t>(SPI.transfer(0)) << 8);
 	endCommand();
-	//Serial.println(state, BIN);
+
 	if(state & (TRANSMIT_FULL_FIFO << 8)) Serial.print("FIFO full");
-	if(state & TRANSMIT_SUCCESSFUL) return SUCCESSFUL;
-	if(state & TRANSMIT_FAIL) return FAIL;
+	if(state & TRANSMIT_SUCCESSFUL) {
+		if(state & RECEIVE_DATA_READY) return SUCCESSFUL | ACK_PAYLOAD_WAITING;
+		else return SUCCESSFUL;
+	}
+	if(state & TRANSMIT_FAIL) {
+		return FAIL;
+	}
+
 	if(0 == (state & (TRANSMIT_EMPTY << 8))) return PENDING;
 
 	return UNDEFINED;
@@ -137,12 +139,9 @@ uint8_t Yanrf::waitForEndOfTransmission(uint32_t timeout){
 	uint8_t ret = TIMEOUT;
 	do{
 		uint8_t state = getTransmissionState();
-		if(state & FAIL) {
-			ret = FAIL;
-			break;
-		}
-		if(state & SUCCESSFUL) {
-			ret = SUCCESSFUL;
+		if(state & (FAIL | SUCCESSFUL)) {
+
+			ret = state;
 			break;
 		}
 		if(state & UNDEFINED) ret = UNDEFINED;
@@ -150,9 +149,9 @@ uint8_t Yanrf::waitForEndOfTransmission(uint32_t timeout){
 	// clear all flags
 	writeRegister(REG_STATUS, 0xFF);
 	if(ret & UNSUCCESSFUL){
-		 // if transmission fails we need to manualy flush FIFO
-		beginCommand(CMD_FLUSH_TRANSMIT);
-		endCommand();
+		 // if transmission fails we need to manualy flush
+		 flushTransmit();
+		 //flushReceive();
 	}
 	return ret;
 }
@@ -167,7 +166,7 @@ uint8_t Yanrf::available(){
 		beginCommand(CMD_READ_RECEIVE_PAYLOAD_LENGTH);
 		uint8_t count = SPI.transfer(0);
 		endCommand();
-		//Serial.println(count);
+
 		if(count > 32){ // something is mighty wrong
 			beginCommand(CMD_FLUSH_RECEIVE);
 			endCommand();
@@ -185,6 +184,27 @@ void Yanrf::read(void * dst, uint8_t count){
 	for(uint8_t * p = reinterpret_cast<uint8_t *>(dst), * end = p + count; p < end; ++p){
 		*p = SPI.transfer(0);
 	}
+	endCommand();
+}
+
+
+void Yanrf::ackPayload(const void * data, uint8_t count, bool overwrite){
+	if(overwrite) flushTransmit();
+
+	beginCommand(CMD_WRITE_ACK_PAYLOAD);
+	for(const uint8_t * p = reinterpret_cast<const uint8_t *>(data), * end = p + count; p < end; ++p){
+		SPI.transfer(*p);
+	}
+	endCommand();
+}
+
+void Yanrf::flushReceive(){
+	beginCommand(CMD_FLUSH_RECEIVE);
+	endCommand();
+}
+
+void Yanrf::flushTransmit(){
+	beginCommand(CMD_FLUSH_TRANSMIT);
 	endCommand();
 }
 

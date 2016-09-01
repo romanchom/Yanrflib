@@ -157,7 +157,9 @@ public:
 	uint8_t available();
 	void read(void * dst, uint8_t count);
 
-
+	void ackPayload(const void * data, uint8_t count, bool overwrite);
+	void flushReceive();
+	void flushTransmit();
 
 	enum returnValues{
 		SUCCESSFUL = 0x01,
@@ -165,6 +167,7 @@ public:
 		FAIL = 0x04,
 		UNDEFINED = 0x08, // indicates there is a problem with radio, possibly connection error
 		TIMEOUT = 0x10,
+		ACK_PAYLOAD_WAITING = 0x20,
 		UNSUCCESSFUL = FAIL | UNDEFINED | TIMEOUT,
 	};
 	enum {
